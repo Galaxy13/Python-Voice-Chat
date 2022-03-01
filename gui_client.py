@@ -10,8 +10,8 @@ def connect():
 
 window = Tk()
 window.title('Voice chat для пацанов')
-label = Label(window, text='Pre-alpha 2', font=("Times New Roman", 30))
-window.geometry('300x150')
+label = Label(window, text='Pre-alpha v3', font=("Times New Roman", 30))
+window.geometry('320x150')
 label.grid(column=0, row=0)
 button_connect = Button(window, text='Connect to server', bg='pink', fg='black', command=connect)
 button_connect.grid(column=1, row=0)
