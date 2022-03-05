@@ -3,6 +3,15 @@
 import socket
 import threading
 import pyaudio
+import win32api
+import win32gui
+
+HEADER = 64
+FORMAT = 'utf-8'
+
+
+WM_APPCOMMAND = 0x319
+APPCOMMAND_MICROPHONE_VOLUME_MUTE = 0x180000
 
 chunk_size = 1024  # 512
 audio_format = pyaudio.paInt16
@@ -20,25 +29,34 @@ class Client:
         self.device_list()
 
         # initialise microphone recording and audio streaming
-        self.recording_stream = self.p.open(format=audio_format, channels=channels, rate=rate, input=True,
-                                            frames_per_buffer=chunk_size)
-        self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True,
-                                          frames_per_buffer=chunk_size)
+        # self.recording_stream = self.p.open(format=audio_format, channels=channels, rate=rate, input=True,
+        #                                     frames_per_buffer=chunk_size)
+        self.recording_stream = pyaudio.Stream(PA_manager=self.p, format=audio_format, channels=channels, rate=rate,
+                                               input=True, frames_per_buffer=chunk_size)
+        # self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True,
+        #                                   frames_per_buffer=chunk_size)
+        self.playing_stream = pyaudio.Stream(PA_manager=self.p, format=audio_format, channels=channels, rate=rate,
+                                             input=True, frames_per_buffer=chunk_size)
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        self.input_thread = threading.Thread(target=self.receive_client)
+        self.output_thread = threading.Thread(target=self.send_data_to_server)
 
         # socket parameters
         self.target_ip = server_ip
         self.target_port = port
+        self.last_input_device = None
+        self.last_output_device = None
         self.connected = 0
 
     def client_launch(self):
         print("Connected to Server")
 
         # Threads start
-        threading.Thread(target=self.receive_server_data).start()
-        threading.Thread(target=self.send_data_to_server).start()
+        self.input_thread.start()
+        self.output_thread.start()
 
-    def receive_server_data(self):
+    def receive_audio_data(self):
         while True:
             try:
                 data = self.s.recv(1024)
@@ -85,6 +103,10 @@ class Client:
     def set_port(self, port):
         self.target_port = int(port)
 
+    def input_control(self):
+        hwnd_active = win32gui.GetForegroundWindow()
+        win32api.SendMessage(hwnd_active, WM_APPCOMMAND, None, APPCOMMAND_MICROPHONE_VOLUME_MUTE)
+
     def input_stop(self):
         self.recording_stream.stop_stream()
 
@@ -92,7 +114,29 @@ class Client:
         self.recording_stream.start_stream()
 
     def output_stop(self):
+        # self.last_output_device = self.output_devices[self.p.get_default_output_device_info().get('name')]
         self.playing_stream.stop_stream()
 
     def output_start(self):
+        # self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True,
+        #                                   frames_per_buffer=chunk_size, output_device_index=self.last_output_device)
         self.playing_stream.start_stream()
+
+    def send_msg(self, msg):
+        message = msg.encode(FORMAT)
+        msg_length = len(message)
+        send_length = str(msg_length).encode(FORMAT)
+        send_length = b' ' * (HEADER - len(send_length))
+        self.s.send(send_length)
+        self.s.send(message)
+
+    def receive_client(self):
+        while 1:
+            msg_type = self.s.recv(128).decode(FORMAT)
+            if msg_type[0] == 'V':
+                self.receive_audio_data()
+            elif msg_type[1] == 'C':
+                msg_length = self.s.recv(HEADER).decode(FORMAT)
+                msg_length = int(msg_length)
+                msg = self.s.recv(msg_length).decode(FORMAT)
+
